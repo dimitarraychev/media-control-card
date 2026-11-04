@@ -1,12 +1,13 @@
 # Media Control Card
 
-A Home Assistant Lovelace card for media players: header, − / + volume stepper and a row of fully customizable action buttons (play, pause, stop, mute, anything). Styled like Mushroom or Bubble Card, with a visual editor.
+A Home Assistant Lovelace card for media players: header, − / + volume stepper, a row of fully customizable action buttons (play, pause, stop, mute, anything) and an optional Radio Browser station picker. Styled like Mushroom or Bubble Card, with a visual editor.
 
 ## Features
 
 - Header with icon, name, state, volume and optional media title/artist
 - − / + volume stepper (`media_player.volume_set`) with debounce and instant feedback
-- Row of custom buttons: presets or any action/service
+- Row of custom buttons: presets or any action/service, added and edited from the UI
+- Radio browser: browse Home Assistant's Radio Browser tree, search and play stations on the player
 - Each section can be toggled, so the card can be just the stepper or just the buttons
 - Mushroom or Bubble style, state coloring, glow animation
 - Volume step, minimum and maximum limits
@@ -62,8 +63,9 @@ show_buttons: false
 | `show_header` | boolean | `true` | Show icon, name and status |
 | `show_volume_control` | boolean | `true` | Show the − / + stepper |
 | `show_buttons` | boolean | `true` | Show the button row |
+| `show_radio` | boolean | `false` | Show the radio browser |
 | `buttons` | list | none | Buttons, see below |
-| `layout` | string | `volume_buttons` | `volume_buttons` or `buttons_volume` |
+| `layout` | string | `volume_buttons_radio` | Order of the sections, e.g. `radio_volume_buttons`. Any order of `volume`, `buttons`, `radio` joined by `_` |
 | `tap_action` | object | `more-info` | Header tap action |
 | `card_style` | string | `mushroom` | `mushroom` or `bubble` |
 | `step` | number | `5` | Volume step in % |
@@ -78,6 +80,17 @@ show_buttons: false
 | `icon_coloring` | boolean | `true` | Icon color follows state |
 
 ## Buttons
+
+### Adding buttons in the visual editor
+
+Press **Add button** in the **Buttons** list. Pick **Custom button** or one of the presets. Each row expands into a form:
+
+- **Preset:** icon, label and color overrides
+- **Custom:** icon, label, color, the action to run (the standard Home Assistant action editor, including the service picker and its data), an optional entity for toggle / more-info, and an optional **Highlight the button when…** section (state, or attribute and value)
+
+Use the arrows to reorder rows and the bin to delete one.
+
+### Buttons in YAML
 
 Each entry in `buttons` is a preset name, or an object.
 
@@ -106,11 +119,13 @@ buttons:
 | `tap_action` | Action to run (see below) |
 | `service` / `perform_action` | Shortcut for a `perform-action` tap action |
 | `data`, `target` | Used with the shortcut above |
-| `active` | When to highlight the button |
+| `entity` | Entity for `toggle` / `more-info` (default: this player) |
+| `active` | When to highlight the button (YAML form) |
+| `active_state`, `active_attribute`, `active_value` | Same, as flat fields (what the editor writes) |
 
 ### Actions
 
-`tap_action.action` can be `perform-action`, `toggle`, `more-info`, `navigate` or `url`. If a `perform-action` has no `target`, it uses the card's entity.
+`tap_action.action` can be `perform-action`, `toggle`, `more-info`, `navigate` or `url`. A `perform-action` for a `media_player` service without a `target` uses this card's player. Other services need their own `target`.
 
 ```yaml
 buttons:
@@ -148,12 +163,51 @@ active:
   value: true
 ```
 
+## Radio browser
+
+Turn on **Show radio browser** (`show_radio: true`) to add a station picker. It uses the built-in **Radio Browser** integration, so add that first under **Settings → Devices & services**.
+
+The picker shows the integration's folders (Favorites, By country, By language, By popularity, By tag…), with a back button, a search box that filters the current folder, and station logos. Tapping a folder opens it, tapping a station plays it on the card's player with `media_player.play_media`. The station that is playing is highlighted. The tree loads the first time the section is shown, and folders are cached while the page is open.
+
+```yaml
+type: custom:media-control-card
+entity: media_player.kitchen
+show_radio: true
+radio_max_height: 320
+layout: volume_radio_buttons
+```
+
+### Radio options
+
+In the editor these are in their own **Radio browser settings** section.
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `radio_title` | string | `Radio` | Title of the top level |
+| `radio_max_height` | number | `240` | List height in px, the list scrolls |
+| `radio_show_search` | boolean | `true` | Show the search box |
+| `radio_show_thumbnails` | boolean | `true` | Show station logos |
+| `radio_stations` | list | none | Pinned stations, see below |
+| `radio_root` | string | `media-source://radio_browser` | Start folder |
+
+### Pinned stations
+
+Stations you always want one tap away. They show up as a **Pinned stations** folder at the top level. `media_content_id` is the station's `media-source://radio_browser/...` ID, which you can see in the media browser.
+
+```yaml
+radio_stations:
+  - name: BBC Radio 1
+    media_content_id: media-source://radio_browser/<station-uuid>
+    thumbnail: https://example.com/logo.png   # optional
+```
+
 ## Notes
 
 - The stepper is disabled while the player is off or has no `volume_level`.
 - Buttons are disabled only when the player is unavailable.
 - If the header is hidden, tap the volume number to open more-info.
-- In the visual editor, buttons are edited as YAML.
+- Station logos come from the stations themselves. If Home Assistant runs over HTTPS, logos served over plain HTTP are blocked by the browser and a radio icon is shown instead.
+- Pinned stations are edited as YAML in the visual editor.
 
 ## License
 
