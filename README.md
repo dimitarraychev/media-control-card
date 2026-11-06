@@ -49,8 +49,25 @@ Volume only:
 ```yaml
 type: custom:media-control-card
 entity: media_player.living_room
-show_header: false
-show_buttons: false
+sections:
+  - id: header
+    show: false
+  - volume
+```
+
+## Sections
+
+The card has four sections: header, volume, buttons and radio. In the visual editor, the **Sections** list has a toggle for each one and up/down arrows to reorder them. The header is pinned on top, so it can only be shown or hidden.
+
+`sections` is an ordered list of ids. A section you leave out is hidden, and you can also hide one in place with `show: false`. Without `sections`, the card shows header, volume and buttons.
+
+```yaml
+sections:
+  - header
+  - radio
+  - volume
+  - id: buttons
+    show: false
 ```
 
 ## Options
@@ -60,12 +77,8 @@ show_buttons: false
 | `entity` | string | **required** | `media_player` entity |
 | `name` | string | friendly name | Card name |
 | `icon` | string | by device class | Header icon |
-| `show_header` | boolean | `true` | Show icon, name and status |
-| `show_volume_control` | boolean | `true` | Show the − / + stepper |
-| `show_buttons` | boolean | `true` | Show the button row |
-| `show_radio` | boolean | `false` | Show the radio browser |
+| `sections` | list | header, volume, buttons | Sections to show and their order, see above |
 | `buttons` | list | none | Buttons, see below |
-| `layout` | string | `volume_buttons_radio` | Order of the sections, e.g. `radio_volume_buttons`. Any order of `volume`, `buttons`, `radio` joined by `_` |
 | `tap_action` | object | `more-info` | Header tap action |
 | `card_style` | string | `mushroom` | `mushroom` or `bubble` |
 | `step` | number | `5` | Volume step in % |
@@ -165,16 +178,18 @@ active:
 
 ## Radio browser
 
-Turn on **Show radio browser** (`show_radio: true`) to add a station picker. It uses the built-in **Radio Browser** integration, so add that first under **Settings → Devices & services**.
+Turn on the **Radio browser** section (add `radio` to `sections`) to add a station picker. It uses the built-in **Radio Browser** integration, so add that first under **Settings → Devices & services**.
 
 The picker shows the integration's folders (Favorites, By country, By language, By popularity, By tag…), with a back button, a search box that filters the current folder, and station logos. Tapping a folder opens it, tapping a station plays it on the card's player with `media_player.play_media`. The station that is playing is highlighted. The tree loads the first time the section is shown, and folders are cached while the page is open.
 
 ```yaml
 type: custom:media-control-card
 entity: media_player.kitchen
-show_radio: true
+sections:
+  - header
+  - volume
+  - radio
 radio_max_height: 320
-layout: volume_radio_buttons
 ```
 
 ### Radio options
