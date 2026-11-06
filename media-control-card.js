@@ -1,12 +1,12 @@
 /*
  * Media Control Card
  * Header, − / + volume stepper, custom action buttons and a Radio Browser
- * station picker in one card. Each section can be toggled; styling can be
- * Mushroom or Bubble.
+ * station picker in one card. The header is pinned on top, the other sections
+ * can be shown, hidden and reordered; styling can be Mushroom or Bubble.
  */
 const TAG = "media-control-card";
 const EDITOR_TAG = "media-control-card-editor";
-const CARD_VERSION = "0.2.0-beta";
+const CARD_VERSION = "0.3.0-beta";
 
 const DEFAULT_RADIO_ROOT = "media-source://radio_browser";
 const PINNED_ID = "__pinned__";
@@ -56,25 +56,40 @@ const PRESETS = {
 };
 const PRESET_OPTIONS = Object.keys(PRESETS);
 
-// ---------- section order ----------
-// The header is always first. Volume, Buttons and Radio can be put in any
-// order (the card is a flex column, sections are re-ordered with CSS `order`).
-const SECTIONS = ["volume", "buttons", "radio"];
-const SECTION_LABEL = { volume: "Volume", buttons: "Buttons", radio: "Radio" };
-const permutations = (a) =>
-  a.length <= 1 ? [a] : a.flatMap((x, i) => permutations([...a.slice(0, i), ...a.slice(i + 1)]).map((p) => [x, ...p]));
-const LAYOUT_OPTIONS = permutations(SECTIONS).map((p) => ({
-  value: p.join("_"),
-  label: p.map((s) => SECTION_LABEL[s]).join(" → "),
-}));
-const DEFAULT_LAYOUT = "volume_buttons_radio";
-// Missing sections are appended, so old values like "buttons_volume" still work.
-const parseLayout = (v) => {
-  const seen = [];
-  String(v ?? "").split("_").forEach((x) => { if (SECTIONS.includes(x) && !seen.includes(x)) seen.push(x); });
-  SECTIONS.forEach((s) => { if (!seen.includes(s)) seen.push(s); });
-  return seen;
+// ---------- sections ----------
+// The header is pinned on top, it can only be shown or hidden. Volume, Buttons
+// and Radio can be shown, hidden and reordered (the card is a flex column,
+// sections are re-ordered with CSS `order`). `sections` in the config is an
+// ordered list of ids; hide one with `- id: radio` + `show: false`. Unlisted
+// sections are hidden.
+const SECTION_IDS = ["header", "volume", "buttons", "radio"];
+const SECTION_META = {
+  header: { icon: "mdi:page-layout-header", label: "Header (icon, name, status)" },
+  volume: { icon: "mdi:volume-high", label: "Volume control (− / +)" },
+  buttons: { icon: "mdi:gesture-tap-button", label: "Action buttons" },
+  radio: { icon: "mdi:radio", label: "Radio browser" },
 };
+const DEFAULT_SECTIONS = [
+  { id: "header", show: true },
+  { id: "volume", show: true },
+  { id: "buttons", show: true },
+  { id: "radio", show: false },
+];
+function effectiveSections(cfg) {
+  if (!Array.isArray(cfg.sections)) return DEFAULT_SECTIONS.map((x) => ({ ...x }));
+  const seen = new Set();
+  const listed = [];
+  cfg.sections.forEach((x) => {
+    const o = typeof x === "string" ? { id: x } : x;
+    if (!o || !SECTION_IDS.includes(o.id) || seen.has(o.id)) return;
+    seen.add(o.id);
+    listed.push({ id: o.id, show: o.show !== false });
+  });
+  SECTION_IDS.forEach((id) => { if (!seen.has(id)) listed.push({ id, show: false }); });
+  // the header always stays on top
+  return [listed.find((x) => x.id === "header"), ...listed.filter((x) => x.id !== "header")];
+}
+const resolveSections = (cfg) => effectiveSections(cfg).filter((x) => x.show).map((x) => x.id);
 
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -339,7 +354,7 @@ class MediaControlCard extends HTMLElement {
     });
     // When the header is hidden, tapping the volume number opens more-info
     this._vcenter.addEventListener("click", () => {
-      if (this._config?.show_header === false) {
+      if (this._config && !resolveSections(this._config).includes("header")) {
         this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: this._config.entity }, bubbles: true, composed: true }));
       }
     });
@@ -399,10 +414,6 @@ class MediaControlCard extends HTMLElement {
   setConfig(config) {
     if (!config || !config.entity) throw new Error("You need to define a media_player entity");
     this._config = {
-      show_header: true,
-      show_volume_control: true,
-      show_buttons: true,
-      show_radio: false,
       tap_action: { action: "more-info" },
       ...config,
     };
@@ -425,13 +436,9 @@ class MediaControlCard extends HTMLElement {
   }
 
   getCardSize() {
-    const c = this._config || {};
-    let n = 0;
-    if (c.show_header !== false) n += 1;
-    if (c.show_volume_control !== false) n += 1;
-    if (c.show_buttons !== false && this._buttons?.length) n += 1;
-    if (c.show_radio) n += 3;
-    return Math.max(n, 1);
+    const vis = resolveSections(this._config || {});
+    const size = { header: 1, volume: 1, buttons: 1, radio: 3 };
+    return Math.max(vis.reduce((n, id) => n + (id === "buttons" && !this._buttons?.length ? 0 : size[id]), 0), 1);
   }
   getGridOptions() { return { columns: 12, min_columns: 3 }; }
 
@@ -572,19 +579,20 @@ class MediaControlCard extends HTMLElement {
     if (!this._config || !this._hass) return;
     const cfg = this._config;
     const m = this._model();
-    const showHeader = cfg.show_header !== false;
-    const showVol = cfg.show_volume_control !== false;
-    const showButtons = cfg.show_buttons !== false && this._buttons.length > 0;
-    const showRadio = !!cfg.show_radio;
+    const sections = effectiveSections(cfg);
+    const vis = new Set(sections.filter((x) => x.show).map((x) => x.id));
+    const showHeader = vis.has("header");
+    const showVol = vis.has("volume");
+    const showButtons = vis.has("buttons") && this._buttons.length > 0;
+    const showRadio = vis.has("radio");
     const bubble = cfg.card_style === "bubble";
     const animate = cfg.animation !== false;
-    const order = parseLayout(cfg.layout);
     const btnIconSize = Math.min(Math.max(Number(cfg.button_icon_size) || 24, 10), 48);
     const radioH = Math.min(Math.max(Number(cfg.radio_max_height) || 240, 100), 800);
     const radioSearch = cfg.radio_show_search !== false;
     const radioThumbs = cfg.radio_show_thumbnails !== false;
     const key = JSON.stringify([
-      m, !!cfg.show_labels, showHeader, showVol, showButtons, showRadio, bubble, animate, order, btnIconSize,
+      m, !!cfg.show_labels, sections, this._buttons.length, bubble, animate, btnIconSize,
       radioH, radioSearch, radioThumbs, cfg.radio_stations || null, cfg.radio_title || null,
     ]);
     if (key === this._key) return;
@@ -592,13 +600,14 @@ class MediaControlCard extends HTMLElement {
     this._playingTitle = m.playingTitle || "";
     this._playingId = m.playingId || "";
 
-    // layout toggles
+    // layout toggles (the header is always first)
+    const pos = (id) => sections.findIndex((x) => x.id === id);
     this._card.classList.toggle("bubble", bubble);
     this._card.classList.toggle("static", !animate);
     this._head.style.order = 0;
-    this._vol.style.order = 1 + order.indexOf("volume");
-    this._track.style.order = 1 + order.indexOf("buttons");
-    this._radioEl.style.order = 1 + order.indexOf("radio");
+    this._vol.style.order = pos("volume");
+    this._track.style.order = pos("buttons");
+    this._radioEl.style.order = pos("radio");
     this._card.classList.toggle("solo-vol", !showHeader && !showButtons && !showRadio && showVol);
     this._head.hidden = !showHeader;
     this._vol.hidden = !showVol;
@@ -865,11 +874,6 @@ const EDITOR_LABELS = {
   entity: "Media player entity",
   name: "Name",
   icon: "Icon",
-  show_header: "Show header (icon, name, status)",
-  show_volume_control: "Show − / + volume control",
-  show_buttons: "Show action buttons",
-  show_radio: "Show radio browser",
-  layout: "Order of sections",
   show_media_info: "Show media title / artist",
   show_labels: "Show labels under button icons",
   tap_action: "Header tap action",
@@ -906,14 +910,9 @@ const EDITOR_HELPERS = {
 // Values the card uses when a key is missing. The editor shows these and
 // never writes them into the YAML.
 const EDITOR_DEFAULTS = {
-  show_header: true,
-  show_volume_control: true,
-  show_buttons: true,
-  show_radio: false,
   show_media_info: false,
   show_labels: false,
   card_style: "mushroom",
-  layout: DEFAULT_LAYOUT,
   animation: true,
   coloring: true,
   icon_coloring: true,
@@ -925,26 +924,20 @@ const EDITOR_DEFAULTS = {
 
 const schemaNames = (schema) => schema.flatMap((s) => (s.schema ? schemaNames(s.schema) : s.name ? [s.name] : []));
 
-// Main toggles (above the button editor)
+// Entity, name and icon (above the sections list)
 const getTopSchema = () => [
   { name: "entity", required: true, selector: { entity: { domain: "media_player" } } },
   { name: "name", selector: { text: {} } },
   { name: "icon", selector: { icon: {} } },
-  { name: "show_header", selector: { boolean: {} } },
-  { name: "show_volume_control", selector: { boolean: {} } },
-  { name: "show_buttons", selector: { boolean: {} } },
-  { name: "show_radio", selector: { boolean: {} } },
 ];
 
-// Layout, tap action, radio settings and advanced (below the button editor)
+// Tap action, radio settings and advanced (below the button editor)
 const getBottomSchema = (cfg) => {
-  const showHeader = cfg.show_header !== false;
-  const showButtons = cfg.show_buttons !== false;
-  const showVol = cfg.show_volume_control !== false;
-  const showRadio = !!cfg.show_radio;
-  const sections = [showVol, showButtons, showRadio].filter(Boolean).length;
+  const vis = resolveSections(cfg);
+  const showHeader = vis.includes("header");
+  const showButtons = vis.includes("buttons");
+  const showRadio = vis.includes("radio");
   return [
-    ...(sections > 1 ? [{ name: "layout", selector: { select: { mode: "dropdown", options: LAYOUT_OPTIONS } } }] : []),
     ...(showHeader ? [{ name: "tap_action", selector: { ui_action: {} } }] : []),
     ...(showRadio
       ? [
@@ -1073,8 +1066,80 @@ const EDITOR_CSS = `
   .mcc-chip.custom { border-color: var(--primary-color); color: var(--primary-color); }
   .mcc-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mcc-cancel { all: unset; cursor: pointer; display: block; margin: 10px auto 0; font-size: 13px; color: var(--secondary-text-color); }
+  .mcc-hrow { display: flex; align-items: center; }
+  .mcc-hrow span { flex: 1; }
+  .mcc-reset { all: unset; cursor: pointer; font-size: 12px; color: var(--primary-color); }
+  .mcc-pin { width: 68px; height: 32px; flex: none; display: flex; align-items: center; justify-content: center; color: var(--secondary-text-color); --mdc-icon-size: 18px; }
+  .mcc-tgl { all: unset; box-sizing: border-box; cursor: pointer; flex: none; position: relative; width: 38px; height: 22px; border-radius: 11px; margin: 0 8px 0 4px; background: var(--disabled-color, #bdbdbd); transition: background .2s; }
+  .mcc-tgl::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .2s; box-shadow: 0 1px 3px rgba(0,0,0,.35); }
+  .mcc-tgl.on { background: var(--primary-color); }
+  .mcc-tgl.on::after { transform: translateX(16px); }
+  .mcc-row.hidden-sec .t, .mcc-row.hidden-sec > .mcc-rh > ha-icon { opacity: .55; }
   .mcc-empty { font-size: 13px; color: var(--secondary-text-color); margin-bottom: 8px; }
 `;
+
+// Rows to show / hide and reorder the card's sections. The header is pinned on top.
+class SectionsEditor {
+  constructor(host, commit) {
+    this.commit = commit;
+    this.wrap = document.createElement("div");
+    this.wrap.className = "mcc-btns";
+    host.appendChild(this.wrap);
+  }
+
+  update(list, custom) {
+    const wrap = this.wrap;
+    wrap.innerHTML = "";
+    const head = document.createElement("div");
+    head.className = "mcc-h mcc-hrow";
+    const t = document.createElement("span");
+    t.textContent = "Sections";
+    head.appendChild(t);
+    if (custom) {
+      const reset = document.createElement("button");
+      reset.className = "mcc-reset";
+      reset.textContent = "Reset to default";
+      reset.addEventListener("click", () => this.commit(null));
+      head.appendChild(reset);
+    }
+    wrap.appendChild(head);
+    list.forEach((it, i) => {
+      const meta = SECTION_META[it.id];
+      const pinned = it.id === "header";
+      const row = document.createElement("div");
+      row.className = "mcc-row" + (it.show ? "" : " hidden-sec");
+      const rh = document.createElement("div");
+      rh.className = "mcc-rh";
+      rh.style.cursor = "default";
+      rh.innerHTML = `
+        <ha-icon icon="${meta.icon}"></ha-icon>
+        <div class="t"><div class="n"></div><div class="s"></div></div>
+        ${
+          pinned
+            ? `<span class="mcc-pin" title="The header always stays on top"><ha-icon icon="mdi:pin-outline"></ha-icon></span>`
+            : `<button class="mcc-ib" data-a="up" title="Move up" ${i <= 1 ? "disabled" : ""}><ha-icon icon="mdi:arrow-up"></ha-icon></button>
+               <button class="mcc-ib" data-a="down" title="Move down" ${i === list.length - 1 ? "disabled" : ""}><ha-icon icon="mdi:arrow-down"></ha-icon></button>`
+        }
+        <button class="mcc-tgl${it.show ? " on" : ""}" data-a="tgl" role="switch" aria-checked="${it.show}" title="${it.show ? "Hide" : "Show"}"></button>`;
+      rh.querySelector(".n").textContent = meta.label;
+      rh.querySelector(".s").textContent = pinned ? (it.show ? "Shown, always on top" : "Hidden") : it.show ? "Shown" : "Hidden";
+      rh.addEventListener("click", (e) => {
+        const a = e.target.closest("[data-a]")?.dataset.a;
+        if (!a) return;
+        const cur = list.map((x) => ({ ...x }));
+        if (a === "tgl") cur[i].show = !cur[i].show;
+        else {
+          const j = a === "up" ? i - 1 : i + 1;
+          if (j < 1 || j >= cur.length) return; // never above the header
+          [cur[i], cur[j]] = [cur[j], cur[i]];
+        }
+        this.commit(cur);
+      });
+      row.appendChild(rh);
+      wrap.appendChild(row);
+    });
+  }
+}
 
 // The editor merges the card's defaults into the form data so toggles that
 // default to "on" are shown as on. Buttons get their own list editor:
@@ -1137,6 +1202,17 @@ class MediaControlCardEditor extends HTMLElement {
     this._top = this._makeForm(getTopSchema(), onFormChange(() => getTopSchema()));
     this.appendChild(this._top);
 
+    this._sections = new SectionsEditor(this, (list) => {
+      const c = { ...this._config };
+      for (const k of ["show_header", "show_volume_control", "show_buttons", "show_radio", "layout"]) delete c[k]; // old keys
+      const written = list === null ? null : list.map((x) => (x.show ? x.id : { id: x.id, show: false }));
+      // the default arrangement is not written into the YAML
+      const isDefault = written && JSON.stringify(list) === JSON.stringify(DEFAULT_SECTIONS);
+      if (written === null || isDefault) delete c.sections;
+      else c.sections = written;
+      this._emit(c);
+    });
+
     this._btnWrap = document.createElement("div");
     this._btnWrap.className = "mcc-btns";
     this.appendChild(this._btnWrap);
@@ -1154,13 +1230,15 @@ class MediaControlCardEditor extends HTMLElement {
 
     this._top.data = data;
 
-    const schemaKey = JSON.stringify([cfg.show_header !== false, cfg.show_buttons !== false, cfg.show_volume_control !== false, !!cfg.show_radio]);
+    const vis = resolveSections(cfg);
+    const schemaKey = JSON.stringify(vis);
     if (schemaKey !== this._schemaKey) {
       this._schemaKey = schemaKey;
       this._bottom.schema = getBottomSchema(cfg);
     }
     this._bottom.data = data;
 
+    this._sections.update(effectiveSections(cfg), Array.isArray(cfg.sections));
     this._renderButtons();
   }
 
@@ -1191,7 +1269,7 @@ class MediaControlCardEditor extends HTMLElement {
   }
 
   _renderButtons() {
-    const show = this._config.show_buttons !== false;
+    const show = resolveSections(this._config).includes("buttons");
     this._btnWrap.hidden = !show;
     if (!show) return;
     const list = this._buttons();
