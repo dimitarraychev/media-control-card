@@ -6,7 +6,7 @@
  */
 const TAG = "media-control-card";
 const EDITOR_TAG = "media-control-card-editor";
-const CARD_VERSION = "0.3.0-beta";
+const CARD_VERSION = "0.3.1-beta";
 
 const DEFAULT_RADIO_ROOT = "media-source://radio_browser";
 const PINNED_ID = "__pinned__";
@@ -815,8 +815,16 @@ class MediaControlCard extends HTMLElement {
     this._pendingVol = next;
     this._render();
     clearTimeout(this._volTimer);
-    this._volTimer = setTimeout(() => {
-      this._hass.callService("media_player", "volume_set", { entity_id: this._config.entity, volume_level: next / 100 });
+    this._volTimer = setTimeout(async () => {
+      const entity = this._config.entity;
+      try {
+        if (this._state()?.attributes?.is_volume_muted === true) {
+          await this._hass.callService("media_player", "volume_mute", { entity_id: entity, is_volume_muted: false });
+        }
+        await this._hass.callService("media_player", "volume_set", { entity_id: entity, volume_level: next / 100 });
+      } catch (e) {
+        console.warn("media-control-card: volume change failed", e);
+      }
       clearTimeout(this._volRelease);
       this._volRelease = setTimeout(() => { this._pendingVol = null; this._render(); }, 4000);
     }, 600);
